@@ -353,12 +353,16 @@ export class GameRenderer {
   }
 
   animateOrbit() {
-    if (!this.pointerState.dragging) {
+    if (this.autoRotateEnabled && !this.pointerState.dragging) {
       this.cameraOrbit.theta += this.autoRotateSpeed;
     }
     if (this.viewType !== 'top') {
       this.updateCameraOrbit();
     }
+  }
+
+  setAutoRotate(enabled) {
+    this.autoRotateEnabled = Boolean(enabled);
   }
 
   resize() {
