@@ -1,3 +1,4 @@
+// Use a 10×10×20 volume so the playfield offers more room than the original 5×5×20 grid.
 export const BOARD_SIZE = {
   width: 10,
   depth: 10,

@@ -27,6 +27,15 @@ export function initUI(gameState) {
   };
 
   const renderer = new GameRenderer(document.getElementById('gameCanvas'));
+  const renderRendererError = () => {
+    const rendererError = renderer.getErrorMessage();
+    if (rendererError) {
+      messageEl.textContent = rendererError;
+      messageEl.removeAttribute('hidden');
+    }
+    return rendererError;
+  };
+  renderRendererError();
 
   const pauseHandler = () => gameState.togglePause();
   const restartHandler = () => gameState.resetGame();
@@ -159,11 +168,14 @@ export function initUI(gameState) {
       stereoGrid.setAttribute('hidden', 'hidden');
     }
 
-    if (state.message) {
-      messageEl.textContent = state.message;
-      messageEl.removeAttribute('hidden');
-    } else {
-      messageEl.setAttribute('hidden', 'hidden');
+    const rendererError = renderRendererError();
+    if (!rendererError) {
+      if (state.message) {
+        messageEl.textContent = state.message;
+        messageEl.removeAttribute('hidden');
+      } else {
+        messageEl.setAttribute('hidden', 'hidden');
+      }
     }
 
     renderer.update(state);

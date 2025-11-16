@@ -5,6 +5,16 @@ import { BOARD_SIZE } from './constants.js';
 const BLOCK_SIZE = 0.9;
 const LANDING_COLOR = '#38bdf8';
 
+const hasWebGLSupport = () => {
+  try {
+    if (!window.WebGLRenderingContext) return false;
+    const canvas = document.createElement('canvas');
+    return Boolean(canvas.getContext('webgl') || canvas.getContext('experimental-webgl'));
+  } catch (error) {
+    return false;
+  }
+};
+
 export class GameRenderer {
   constructor(container) {
     this.container = container;
@@ -32,67 +42,89 @@ export class GameRenderer {
   }
 
   init() {
+    if (!this.container) {
+      this.errorMessage = 'Unable to find a surface to render the game.';
+      return;
+    }
+    if (!hasWebGLSupport()) {
+      this.showFallback('WebGL is not available in this browser. Enable hardware acceleration or try a different browser.');
+      return;
+    }
+
     const { clientWidth, clientHeight } = this.container;
-    this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color('#020617');
+    try {
+      this.scene = new THREE.Scene();
+      this.scene.background = new THREE.Color('#020617');
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true });
-    this.renderer.setPixelRatio(window.devicePixelRatio);
-    this.renderer.setSize(clientWidth, clientHeight);
-    this.container.appendChild(this.renderer.domElement);
-    this.bindPointerControls();
+      this.renderer = new THREE.WebGLRenderer({ antialias: true });
+      this.renderer.setPixelRatio(window.devicePixelRatio);
+      this.renderer.setSize(clientWidth, clientHeight);
+      this.container.appendChild(this.renderer.domElement);
+      this.bindPointerControls();
 
-    this.perspectiveCamera = new THREE.PerspectiveCamera(60, clientWidth / clientHeight, 0.1, 100);
-    this.perspectiveCamera.position.set(10, 12, 14);
-    this.perspectiveCamera.lookAt(0, 0, 0);
-    this.updateCameraOrbit(true);
+      this.perspectiveCamera = new THREE.PerspectiveCamera(60, clientWidth / clientHeight, 0.1, 100);
+      this.perspectiveCamera.position.set(10, 12, 14);
+      this.perspectiveCamera.lookAt(0, 0, 0);
+      this.updateCameraOrbit(true);
 
-    const orthoSize = 10;
-    this.orthoCamera = new THREE.OrthographicCamera(
-      -orthoSize,
-      orthoSize,
-      orthoSize,
-      -orthoSize,
-      0.1,
-      100,
-    );
-    this.orthoCamera.position.set(0, 18, 0);
-    this.orthoCamera.lookAt(0, 0, 0);
+      const orthoSize = 10;
+      this.orthoCamera = new THREE.OrthographicCamera(
+        -orthoSize,
+        orthoSize,
+        orthoSize,
+        -orthoSize,
+        0.1,
+        100,
+      );
+      this.orthoCamera.position.set(0, 18, 0);
+      this.orthoCamera.lookAt(0, 0, 0);
 
-    this.stereoCamera = new THREE.StereoCamera();
-    this.anaglyphEffect = new AnaglyphEffect(this.renderer);
-    this.anaglyphEffect.setSize(clientWidth, clientHeight);
+      this.stereoCamera = new THREE.StereoCamera();
+      this.anaglyphEffect = new AnaglyphEffect(this.renderer);
+      this.anaglyphEffect.setSize(clientWidth, clientHeight);
 
-    const ambient = new THREE.AmbientLight('#ffffff', 0.7);
-    const keyLight = new THREE.DirectionalLight('#f8fafc', 0.7);
-    keyLight.position.set(10, 10, 10);
-    const rimLight = new THREE.PointLight('#93c5fd', 0.4);
-    rimLight.position.set(-8, 15, -8);
-    this.scene.add(ambient, keyLight, rimLight);
+      const ambient = new THREE.AmbientLight('#ffffff', 0.7);
+      const keyLight = new THREE.DirectionalLight('#f8fafc', 0.7);
+      keyLight.position.set(10, 10, 10);
+      const rimLight = new THREE.PointLight('#93c5fd', 0.4);
+      rimLight.position.set(-8, 15, -8);
+      this.scene.add(ambient, keyLight, rimLight);
 
-    const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(BOARD_SIZE.width * BLOCK_SIZE + 1.5, BOARD_SIZE.depth * BLOCK_SIZE + 1.5),
-      new THREE.MeshStandardMaterial({ color: '#0f172a', metalness: 0.2, roughness: 0.85, side: THREE.DoubleSide }),
-    );
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.y = this.floorY - 0.05;
-    this.scene.add(floor);
+      const floor = new THREE.Mesh(
+        new THREE.PlaneGeometry(BOARD_SIZE.width * BLOCK_SIZE + 1.5, BOARD_SIZE.depth * BLOCK_SIZE + 1.5),
+        new THREE.MeshStandardMaterial({ color: '#0f172a', metalness: 0.2, roughness: 0.85, side: THREE.DoubleSide }),
+      );
+      floor.rotation.x = -Math.PI / 2;
+      floor.position.y = this.floorY - 0.05;
+      this.scene.add(floor);
 
-    this.floorGrid = this.createFloorGrid();
-    this.scene.add(this.floorGrid);
+      this.floorGrid = this.createFloorGrid();
+      this.scene.add(this.floorGrid);
 
-    this.blockGroup = new THREE.Group();
-    this.scene.add(this.blockGroup);
+      this.blockGroup = new THREE.Group();
+      this.scene.add(this.blockGroup);
 
-    this.landingGroup = new THREE.Group();
-    this.scene.add(this.landingGroup);
+      this.landingGroup = new THREE.Group();
+      this.scene.add(this.landingGroup);
+    } catch (error) {
+      console.error('Failed to initialize WebGL renderer', error);
+      if (this.renderer) {
+        this.renderer.dispose();
+        this.renderer = null;
+      }
+      this.showFallback('3D rendering failed to start. Please enable WebGL or update your graphics drivers to continue.');
+      return;
+    }
 
+    this.errorMessage = '';
+    this.ready = true;
     window.addEventListener('resize', this.handleResize);
     this.renderLoop = this.renderLoop.bind(this);
     this.renderLoop();
   }
 
   update(state) {
+    if (!this.ready) return;
     this.viewType = state.viewType;
     this.stereoSettings = state.stereoSettings;
     this.cubeOpacity = state.cubeOpacity ?? 1;
@@ -119,12 +151,15 @@ export class GameRenderer {
     const getMaterial = (color, options = {}) => {
       const key = `${color}-${options.transparent ? 't' : 'o'}-${options.emissive ?? '0'}-${options.opacity ?? 1}`;
       if (!materialCache[key]) {
-        materialCache[key] = new THREE.MeshStandardMaterial({
+        const materialOptions = {
           color,
           transparent: Boolean(options.transparent),
           opacity: options.transparent ? options.opacity ?? 0.35 : 1,
-          emissive: options.emissive ? new THREE.Color(options.emissive) : undefined,
-        });
+        };
+        if (options.emissive) {
+          materialOptions.emissive = new THREE.Color(options.emissive);
+        }
+        materialCache[key] = new THREE.MeshStandardMaterial(materialOptions);
       }
       return materialCache[key];
     };
@@ -342,7 +377,7 @@ export class GameRenderer {
   }
 
   draw() {
-    if (!this.renderer || !this.scene) return;
+    if (!this.ready || !this.renderer || !this.scene) return;
     const view = this.viewType;
     if (view === 'top') {
       this.renderer.render(this.scene, this.orthoCamera);
@@ -393,6 +428,32 @@ export class GameRenderer {
     renderer.setViewport(0, 0, width, height);
   }
 
+  isReady() {
+    return this.ready;
+  }
+
+  getErrorMessage() {
+    return this.errorMessage;
+  }
+
+  showFallback(message) {
+    this.ready = false;
+    this.errorMessage = message;
+    if (!this.container) return;
+    this.container.innerHTML = '';
+    const wrapper = document.createElement('div');
+    wrapper.className = 'game-canvas__fallback';
+    const text = document.createElement('p');
+    text.textContent = message;
+    const tip = document.createElement('p');
+    tip.className = 'game-canvas__fallback-tip';
+    tip.textContent = 'Try enabling hardware acceleration or switching to a WebGL-compatible browser to continue playing.';
+    wrapper.appendChild(text);
+    wrapper.appendChild(tip);
+    this.container.appendChild(wrapper);
+    this.fallbackEl = wrapper;
+  }
+
   destroy() {
     cancelAnimationFrame(this.frameHandle);
     window.removeEventListener('resize', this.handleResize);
@@ -408,6 +469,9 @@ export class GameRenderer {
       if (this.renderer.domElement && this.renderer.domElement.parentNode === this.container) {
         this.container.removeChild(this.renderer.domElement);
       }
+    }
+    if (this.fallbackEl && this.fallbackEl.parentNode === this.container) {
+      this.container.removeChild(this.fallbackEl);
     }
   }
 }
