@@ -17,6 +17,7 @@ export function initUI(gameState) {
   const fovValue = document.querySelector('[data-fov-value]');
   const opacityInput = document.getElementById('cubeOpacity');
   const opacityValue = document.querySelector('[data-opacity-value]');
+  const autoRotateToggle = document.getElementById('autoRotate');
   const stats = {
     score: document.querySelector('[data-stat="score"]'),
     level: document.querySelector('[data-stat="level"]'),
@@ -24,6 +25,15 @@ export function initUI(gameState) {
   };
 
   const renderer = new GameRenderer(document.getElementById('gameCanvas'));
+  const renderRendererError = () => {
+    const rendererError = renderer.getErrorMessage();
+    if (rendererError) {
+      messageEl.textContent = rendererError;
+      messageEl.removeAttribute('hidden');
+    }
+    return rendererError;
+  };
+  renderRendererError();
 
   const pauseHandler = () => gameState.togglePause();
   const restartHandler = () => gameState.resetGame();
@@ -32,6 +42,7 @@ export function initUI(gameState) {
   const focusHandler = (event) => gameState.updateStereoSettings({ focusDepth: Number(event.target.value) });
   const fovHandler = (event) => gameState.updateStereoSettings({ fov: Number(event.target.value) });
   const opacityHandler = (event) => gameState.updateOpacity(Number(event.target.value));
+  const autoRotateHandler = (event) => renderer.setAutoRotate(event.target.checked);
 
   pauseButton.addEventListener('click', pauseHandler);
   restartButton.addEventListener('click', restartHandler);
@@ -40,6 +51,10 @@ export function initUI(gameState) {
   focusDepthInput.addEventListener('input', focusHandler);
   fovInput.addEventListener('input', fovHandler);
   opacityInput.addEventListener('input', opacityHandler);
+  if (autoRotateToggle) {
+    autoRotateToggle.addEventListener('change', autoRotateHandler);
+    renderer.setAutoRotate(autoRotateToggle.checked);
+  }
 
   const renderNextPieces = (queue = []) => {
     if (!queue.length) {
@@ -89,11 +104,14 @@ export function initUI(gameState) {
       stereoGrid.setAttribute('hidden', 'hidden');
     }
 
-    if (state.message) {
-      messageEl.textContent = state.message;
-      messageEl.removeAttribute('hidden');
-    } else {
-      messageEl.setAttribute('hidden', 'hidden');
+    const rendererError = renderRendererError();
+    if (!rendererError) {
+      if (state.message) {
+        messageEl.textContent = state.message;
+        messageEl.removeAttribute('hidden');
+      } else {
+        messageEl.setAttribute('hidden', 'hidden');
+      }
     }
 
     renderer.update(state);
@@ -107,6 +125,9 @@ export function initUI(gameState) {
     focusDepthInput.removeEventListener('input', focusHandler);
     fovInput.removeEventListener('input', fovHandler);
     opacityInput.removeEventListener('input', opacityHandler);
+    if (autoRotateToggle) {
+      autoRotateToggle.removeEventListener('change', autoRotateHandler);
+    }
     renderer.destroy();
   };
 

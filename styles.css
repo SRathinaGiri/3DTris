@@ -188,6 +188,31 @@ label {
   color: #94a3b8;
 }
 
+label.toggle {
+  align-items: center;
+  justify-content: flex-start;
+  margin: 0.25rem 0 1rem;
+}
+
+label.toggle input[type='checkbox'] {
+  width: auto;
+  margin: 0;
+  accent-color: #38bdf8;
+}
+
+label.toggle span {
+  display: flex;
+  flex-direction: column;
+  color: #e2e8f0;
+  gap: 0.2rem;
+}
+
+label.toggle span small {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  font-weight: 400;
+}
+
 select,
 input[type='range'] {
   width: 100%;
@@ -233,6 +258,28 @@ input[type='range'] {
   min-width: 800px;
 }
 
+.game-canvas__fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 0.75rem;
+  padding: 2rem;
+  color: #cbd5f5;
+}
+
+.game-canvas__fallback p {
+  margin: 0;
+}
+
+.game-canvas__fallback-tip {
+  font-size: 0.95rem;
+  color: #94a3b8;
+}
+
 @media (max-width: 900px) {
   .app__body {
     grid-template-columns: 1fr;
@@ -250,17 +297,6 @@ input[type='range'] {
   border: 1px solid rgba(248, 113, 113, 0.4);
   border-radius: 0.75rem;
   color: #fecdd3;
-}
-
-.piece-preview span {
-  display: inline-flex;
-  width: 1.25rem;
-  height: 1.25rem;
-  align-items: center;
-  justify-content: center;
-  border-radius: 0.35rem;
-  background: rgba(56, 189, 248, 0.2);
-  border: 1px solid rgba(56, 189, 248, 0.4);
 }
 
 [data-stereo-grid][hidden] {
