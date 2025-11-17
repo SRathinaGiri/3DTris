@@ -4,6 +4,7 @@ import { BOARD_SIZE } from './constants.js';
 
 const BLOCK_SIZE = 0.9;
 const LANDING_COLOR = '#38bdf8';
+const EDGE_COLOR = '#0f172a';
 
 const hasWebGLSupport = () => {
   try {
@@ -21,6 +22,8 @@ export class GameRenderer {
     this.viewType = 'perspective';
     this.stereoSettings = { eyeDistance: 0.065, focusDepth: 5, fov: 60 };
     this.materialCache = { geometry: new THREE.BoxGeometry(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE) };
+    this.materialCache.edgeGeometry = new THREE.EdgesGeometry(this.materialCache.geometry);
+    this.edgeMaterialCache = {};
     this.frameHandle = null;
     this.handleResize = () => this.resize();
     this.floorY = -(BOARD_SIZE.height / 2) * BLOCK_SIZE - 0.5;
@@ -140,6 +143,7 @@ export class GameRenderer {
   populateBlocks(grid, activePiece, clearingLayers = []) {
     if (!this.blockGroup) return;
     const geometry = this.materialCache.geometry;
+    const edgeGeometry = this.materialCache.edgeGeometry;
     this.blockGroup.clear();
     const offset = {
       x: -(BOARD_SIZE.width / 2) + 0.5,
@@ -148,6 +152,7 @@ export class GameRenderer {
     };
 
     const materialCache = this.materialCache;
+    const edgeMaterialCache = this.edgeMaterialCache;
     const getMaterial = (color, options = {}) => {
       const key = `${color}-${options.transparent ? 't' : 'o'}-${options.emissive ?? '0'}-${options.opacity ?? 1}`;
       if (!materialCache[key]) {
@@ -164,6 +169,20 @@ export class GameRenderer {
       return materialCache[key];
     };
 
+    const getEdgeMaterial = (options = {}) => {
+      const opacity = options.transparent ? options.opacity ?? 0.35 : 1;
+      const key = `edge-${opacity.toFixed(2)}`;
+      if (!edgeMaterialCache[key]) {
+        edgeMaterialCache[key] = new THREE.LineBasicMaterial({
+          color: EDGE_COLOR,
+          transparent: opacity < 1,
+          opacity,
+          depthWrite: false,
+        });
+      }
+      return edgeMaterialCache[key];
+    };
+
     const createCube = (position, color, options = {}) => {
       const mesh = new THREE.Mesh(geometry, getMaterial(color, options));
       mesh.position.set(
@@ -172,10 +191,19 @@ export class GameRenderer {
         (position.z + offset.z) * BLOCK_SIZE,
       );
       this.blockGroup.add(mesh);
+      if (edgeGeometry) {
+        const edge = new THREE.LineSegments(edgeGeometry, getEdgeMaterial(options));
+        edge.position.copy(mesh.position);
+        edge.scale.set(1.002, 1.002, 1.002);
+        edge.renderOrder = 1;
+        this.blockGroup.add(edge);
+      }
     };
 
     const lockedOpacity = Math.max(0.2, Math.min(1, this.cubeOpacity ?? 1));
     const lockedTransparent = lockedOpacity < 1;
+    const floatingOpacity = Math.max(0.2, Math.min(1, this.cubeOpacity ?? 1));
+    const floatingTransparent = floatingOpacity < 1;
     grid.forEach((layer, y) => {
       layer.forEach((row, z) => {
         row.forEach((cell, x) => {
@@ -211,7 +239,11 @@ export class GameRenderer {
         const x = activePiece.position.x + cx;
         const y = activePiece.position.y + cy;
         const z = activePiece.position.z + cz;
-        createCube({ x, y, z }, activePiece.color, { transparent: true, opacity: 0.45 });
+        createCube(
+          { x, y, z },
+          activePiece.color,
+          { transparent: floatingTransparent, opacity: floatingOpacity },
+        );
       });
     }
 
@@ -245,30 +277,39 @@ export class GameRenderer {
 
   getLandingFootprint(piece) {
     if (!piece) return [];
-    const seen = new Set();
-    const cells = [];
-    piece.cells.forEach(([cx, _cy, cz]) => {
+    const footprint = new Map();
+    piece.cells.forEach(([cx, cy, cz]) => {
       const x = piece.position.x + cx;
       const z = piece.position.z + cz;
+      const y = piece.position.y + cy;
       const key = `${x}:${z}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        cells.push({ x, z });
+      const entry = footprint.get(key);
+      if (!entry || y < entry.y) {
+        footprint.set(key, { x, z, y });
       }
     });
-    return cells;
+    return Array.from(footprint.values());
+  }
+
+  getSupportSurfaceY(supportIndex) {
+    if (supportIndex < 0) {
+      return this.floorY + 0.01;
+    }
+    const offsetY = -(BOARD_SIZE.height / 2) + 0.5;
+    return (supportIndex + offsetY) * BLOCK_SIZE + BLOCK_SIZE / 2 + 0.01;
   }
 
   renderLandingMarkers(footprint) {
     if (!this.landingGroup) return;
     this.landingGroup.clear();
     if (!footprint.length) return;
-    footprint.forEach(({ x, z }) => {
+    footprint.forEach(({ x, z, y }) => {
       const marker = new THREE.Mesh(this.landingGeometry, this.landingMaterial);
       marker.rotation.x = -Math.PI / 2;
+      const supportSurface = this.getSupportSurfaceY(y - 1);
       marker.position.set(
         (x - BOARD_SIZE.width / 2 + 0.5) * BLOCK_SIZE,
-        this.floorY + 0.01,
+        supportSurface,
         (z - BOARD_SIZE.depth / 2 + 0.5) * BLOCK_SIZE,
       );
       this.landingGroup.add(marker);
