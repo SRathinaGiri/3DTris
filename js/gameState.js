@@ -1,13 +1,31 @@
-import { BOARD_SIZE, STORAGE_KEY, SHAPES } from './constants.js';
+import { DEFAULT_BOARD_SIZE, BOARD_LIMITS, STORAGE_KEY, SHAPES } from './constants.js';
 
 const QUEUE_LENGTH = 3;
 
-const createLayer = () => Array.from(
-  { length: BOARD_SIZE.depth },
-  () => Array.from({ length: BOARD_SIZE.width }, () => null),
-);
+const clampGridSize = (value) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return DEFAULT_BOARD_SIZE.width;
+  return Math.max(BOARD_LIMITS.min, Math.min(BOARD_LIMITS.max, Math.round(numeric)));
+};
 
-const createGrid = () => Array.from({ length: BOARD_SIZE.height }, () => createLayer());
+const readSavedProgress = () => {
+  try {
+    if (typeof localStorage === 'undefined') return null;
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (!saved) return null;
+    return JSON.parse(saved);
+  } catch (error) {
+    console.warn('Failed to read progress', error);
+    return null;
+  }
+};
+
+const createLayer = (boardSize) =>
+  Array.from({ length: boardSize.depth }, () => Array.from({ length: boardSize.width }, () => null));
+
+const createGrid = (boardSize) => Array.from({ length: boardSize.height }, () => createLayer(boardSize));
+
+const cloneGrid = (grid) => grid.map((layer) => layer.map((row) => row.slice()));
 
 const rotateCell = ([x, y, z], axis) => {
   switch (axis) {
@@ -48,40 +66,88 @@ const ROTATION_OFFSETS = (() => {
   return combos;
 })();
 
-const randomShape = () => SHAPES[Math.floor(Math.random() * SHAPES.length)];
+const TOTAL_SHAPE_WEIGHT = SHAPES.reduce((sum, shape) => sum + (shape.weight ?? 1), 0);
 
-const spawnPosition = (shape) => {
+const randomShape = () => {
+  const target = Math.random() * TOTAL_SHAPE_WEIGHT;
+  let cumulative = 0;
+  for (const shape of SHAPES) {
+    cumulative += shape.weight ?? 1;
+    if (target <= cumulative) return shape;
+  }
+  return SHAPES[SHAPES.length - 1];
+};
+
+const spawnPosition = (shape, boardSize) => {
   const highestOffset = shape.cells.reduce((max, [, y]) => Math.max(max, y), 0);
   return {
-    x: Math.floor(BOARD_SIZE.width / 2),
-    y: BOARD_SIZE.height - 1 - highestOffset,
-    z: Math.floor(BOARD_SIZE.depth / 2),
+    x: Math.floor(boardSize.width / 2),
+    y: boardSize.height - 1 - highestOffset,
+    z: Math.floor(boardSize.depth / 2),
   };
 };
 
-const createPiece = (shape = randomShape()) => ({
+const createPiece = (shape = randomShape(), boardSize = DEFAULT_BOARD_SIZE) => ({
   ...shape,
-  position: spawnPosition(shape),
+  position: spawnPosition(shape, boardSize),
 });
 
-const createQueue = (length = QUEUE_LENGTH) => Array.from({ length }, () => createPiece());
+const createQueue = (length = QUEUE_LENGTH, boardSize = DEFAULT_BOARD_SIZE) =>
+  Array.from({ length }, () => createPiece(undefined, boardSize));
 
-const mergePiece = (grid, piece) => {
-  const newGrid = grid.map((layer) => layer.map((row) => row.slice()));
+const mergePiece = (grid, piece, boardSize) => {
+  const newGrid = cloneGrid(grid);
   piece.cells.forEach(([cx, cy, cz]) => {
     const x = piece.position.x + cx;
     const y = piece.position.y + cy;
     const z = piece.position.z + cz;
-    if (y >= 0 && y < BOARD_SIZE.height && z >= 0 && z < BOARD_SIZE.depth && x >= 0 && x < BOARD_SIZE.width) {
+    if (
+      y >= 0 &&
+      y < boardSize.height &&
+      z >= 0 &&
+      z < boardSize.depth &&
+      x >= 0 &&
+      x < boardSize.width
+    ) {
       newGrid[y][z][x] = { color: piece.color };
     }
   });
   return newGrid;
 };
 
+const applyBombEffect = (grid, piece, boardSize) => {
+  const newGrid = cloneGrid(grid);
+  let removed = 0;
+  piece.cells.forEach(([cx, cy, cz]) => {
+    const x = piece.position.x + cx;
+    const y = piece.position.y + cy;
+    const z = piece.position.z + cz;
+    if (x < 0 || x >= boardSize.width) return;
+    if (z < 0 || z >= boardSize.depth) return;
+    const targets = [];
+    if (y - 1 >= 0) targets.push(y - 1);
+    targets.push(y);
+    const targetLayer = targets.find(
+      (layer) => layer >= 0 && layer < boardSize.height && newGrid[layer][z][x],
+    );
+    if (typeof targetLayer === 'number') {
+      newGrid[targetLayer][z][x] = null;
+      removed += 1;
+    }
+  });
+  return { grid: newGrid, removed };
+};
+
 export class GameState {
   constructor() {
-    this.grid = createGrid();
+    const savedProgress = readSavedProgress();
+    this.boardSize = { ...DEFAULT_BOARD_SIZE };
+    if (savedProgress?.boardSize) {
+      const savedWidth = clampGridSize(savedProgress.boardSize.width ?? savedProgress.boardSize.depth);
+      this.boardSize.width = savedWidth;
+      this.boardSize.depth = savedWidth;
+    }
+    this.grid = createGrid(this.boardSize);
     this.activePiece = null;
     this.upcomingPieces = [];
     this.nextPiece = null;
@@ -102,41 +168,37 @@ export class GameState {
     this.keyHandler = (event) => this.handleKey(event);
     this.subscribers = new Set();
     this.initializePieces();
-    this.loadProgress();
+    this.applySavedProgress(savedProgress);
   }
 
   initializePieces() {
-    this.upcomingPieces = createQueue(QUEUE_LENGTH + 1);
-    this.activePiece = this.upcomingPieces.shift() ?? createPiece();
+    this.upcomingPieces = createQueue(QUEUE_LENGTH + 1, this.boardSize);
+    this.activePiece = this.upcomingPieces.shift() ?? createPiece(undefined, this.boardSize);
     this.refillQueue();
   }
 
   refillQueue() {
     while (this.upcomingPieces.length < QUEUE_LENGTH) {
-      this.upcomingPieces.push(createPiece());
+      this.upcomingPieces.push(createPiece(undefined, this.boardSize));
     }
     this.nextPiece = this.upcomingPieces[0] ?? null;
   }
 
-  loadProgress() {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (!saved) return;
-      const parsed = JSON.parse(saved);
-      this.level = parsed.level ?? this.level;
-      this.score = parsed.score ?? this.score;
-      this.linesCleared = parsed.linesCleared ?? this.linesCleared;
-    } catch (error) {
-      console.warn('Failed to restore progress', error);
-    }
+  applySavedProgress(savedProgress) {
+    if (!savedProgress) return;
+    this.level = savedProgress.level ?? this.level;
+    this.score = savedProgress.score ?? this.score;
+    this.linesCleared = savedProgress.linesCleared ?? this.linesCleared;
   }
 
   persistProgress() {
     try {
+      if (typeof localStorage === 'undefined') return;
       const payload = JSON.stringify({
         level: this.level,
         score: this.score,
         linesCleared: this.linesCleared,
+        boardSize: this.boardSize,
       });
       localStorage.setItem(STORAGE_KEY, payload);
     } catch (error) {
@@ -156,6 +218,7 @@ export class GameState {
       activePiece: this.activePiece,
       nextPiece: this.nextPiece,
       nextQueue: this.upcomingPieces,
+      boardSize: this.boardSize,
       score: this.score,
       level: this.level,
       linesCleared: this.linesCleared,
@@ -218,8 +281,9 @@ export class GameState {
     }
   }
 
-  resetGame() {
-    this.grid = createGrid();
+  resetGame(options = {}) {
+    const { message = 'Fresh run engaged!', messageDuration = 2000 } = options;
+    this.grid = createGrid(this.boardSize);
     this.initializePieces();
     this.score = 0;
     this.level = 1;
@@ -228,7 +292,7 @@ export class GameState {
     this.isPaused = false;
     this.clearingLayers = [];
     this.gravityEnabled = false;
-    this.setMessage('Fresh run engaged!', 2000);
+    this.setMessage(message, messageDuration);
     this.notify();
     this.scheduleLoop();
   }
@@ -256,14 +320,26 @@ export class GameState {
     this.notify();
   }
 
+  updateBoardSize(nextSize) {
+    const sanitized = clampGridSize(nextSize);
+    if (sanitized === this.boardSize.width && sanitized === this.boardSize.depth) {
+      return;
+    }
+    this.boardSize = { ...this.boardSize, width: sanitized, depth: sanitized };
+    this.resetGame({
+      message: `Playfield resized to ${sanitized}×${sanitized}. Fresh run engaged!`,
+      messageDuration: 2500,
+    });
+  }
+
   canPlace(piece, offset = { x: 0, y: 0, z: 0 }) {
     return piece.cells.every(([cx, cy, cz]) => {
       const x = piece.position.x + cx + offset.x;
       const y = piece.position.y + cy + offset.y;
       const z = piece.position.z + cz + offset.z;
-      if (x < 0 || x >= BOARD_SIZE.width) return false;
-      if (y < 0 || y >= BOARD_SIZE.height) return false;
-      if (z < 0 || z >= BOARD_SIZE.depth) return false;
+      if (x < 0 || x >= this.boardSize.width) return false;
+      if (y < 0 || y >= this.boardSize.height) return false;
+      if (z < 0 || z >= this.boardSize.depth) return false;
       return !this.grid[y][z][x];
     });
   }
@@ -331,9 +407,17 @@ export class GameState {
 
   lockPiece() {
     if (!this.activePiece) return;
-    const merged = mergePiece(this.grid, this.activePiece);
+    let merged;
+    let bombRemoval = 0;
+    if (this.activePiece.type === 'bomb') {
+      const result = applyBombEffect(this.grid, this.activePiece, this.boardSize);
+      merged = result.grid;
+      bombRemoval = result.removed;
+    } else {
+      merged = mergePiece(this.grid, this.activePiece, this.boardSize);
+    }
     const clearedLayers = [];
-    for (let y = 0; y < BOARD_SIZE.height; y += 1) {
+    for (let y = 0; y < this.boardSize.height; y += 1) {
       const isFull = merged[y].every((row) => row.every((cell) => cell));
       if (isFull) clearedLayers.push(y);
     }
@@ -350,8 +434,8 @@ export class GameState {
     let collapsed = merged;
     if (clearedLayers.length) {
       const compacted = merged.filter((_, idx) => !clearedLayers.includes(idx));
-      while (compacted.length < BOARD_SIZE.height) {
-        compacted.push(createLayer());
+      while (compacted.length < this.boardSize.height) {
+        compacted.push(createLayer(this.boardSize));
       }
       collapsed = compacted;
     }
@@ -367,10 +451,15 @@ export class GameState {
       this.setMessage('Perfect clear!', 2000);
     }
 
-    if (!this.upcomingPieces || !this.upcomingPieces.length) {
-      this.upcomingPieces = createQueue(QUEUE_LENGTH + 1);
+    if (bombRemoval > 0) {
+      this.score += bombRemoval * 50;
+      this.setMessage('Bomb cleared an obstacle!', 1200);
     }
-    const candidate = this.upcomingPieces.shift() || createPiece();
+
+    if (!this.upcomingPieces || !this.upcomingPieces.length) {
+      this.upcomingPieces = createQueue(QUEUE_LENGTH + 1, this.boardSize);
+    }
+    const candidate = this.upcomingPieces.shift() || createPiece(undefined, this.boardSize);
     this.refillQueue();
     if (!this.canPlace(candidate)) {
       this.activePiece = null;
