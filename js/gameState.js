@@ -78,16 +78,6 @@ const randomShape = () => {
   return SHAPES[SHAPES.length - 1];
 };
 
-const randomShape = () => {
-  const target = Math.random() * TOTAL_SHAPE_WEIGHT;
-  let cumulative = 0;
-  for (const shape of SHAPES) {
-    cumulative += shape.weight ?? 1;
-    if (target <= cumulative) return shape;
-  }
-  return SHAPES[SHAPES.length - 1];
-};
-
 const spawnPosition = (shape, boardSize) => {
   const highestOffset = shape.cells.reduce((max, [, y]) => Math.max(max, y), 0);
   return {
