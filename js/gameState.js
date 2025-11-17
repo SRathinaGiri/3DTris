@@ -27,6 +27,27 @@ const rotatePiece = (piece, axis) => ({
   cells: piece.cells.map((cell) => rotateCell(cell, axis)),
 });
 
+const ROTATION_OFFSETS = (() => {
+  const values = [0, -1, 1, -2, 2];
+  const combos = [];
+  values.forEach((y) => {
+    values.forEach((x) => {
+      values.forEach((z) => {
+        combos.push({ x, y, z });
+      });
+    });
+  });
+  combos.sort((a, b) => {
+    const sumA = Math.abs(a.x) + Math.abs(a.y) + Math.abs(a.z);
+    const sumB = Math.abs(b.x) + Math.abs(b.y) + Math.abs(b.z);
+    if (sumA !== sumB) return sumA - sumB;
+    if (Math.abs(a.y) !== Math.abs(b.y)) return Math.abs(a.y) - Math.abs(b.y);
+    if (Math.abs(a.x) !== Math.abs(b.x)) return Math.abs(a.x) - Math.abs(b.x);
+    return Math.abs(a.z) - Math.abs(b.z);
+  });
+  return combos;
+})();
+
 const randomShape = () => SHAPES[Math.floor(Math.random() * SHAPES.length)];
 
 const spawnPosition = (shape) => {
@@ -265,9 +286,19 @@ export class GameState {
   rotateActive(axis) {
     if (!this.activePiece) return;
     const rotated = rotatePiece(this.activePiece, axis);
-    if (this.canPlace(rotated)) {
-      this.activePiece = rotated;
-      this.notify();
+    for (const offset of ROTATION_OFFSETS) {
+      if (this.canPlace(rotated, offset)) {
+        this.activePiece = {
+          ...rotated,
+          position: {
+            x: rotated.position.x + offset.x,
+            y: rotated.position.y + offset.y,
+            z: rotated.position.z + offset.z,
+          },
+        };
+        this.notify();
+        return;
+      }
     }
   }
 
