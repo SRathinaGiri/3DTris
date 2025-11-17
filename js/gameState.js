@@ -9,6 +9,8 @@ const createLayer = () => Array.from(
 
 const createGrid = () => Array.from({ length: BOARD_SIZE.height }, () => createLayer());
 
+const cloneGrid = (grid) => grid.map((layer) => layer.map((row) => row.slice()));
+
 const rotateCell = ([x, y, z], axis) => {
   switch (axis) {
     case 'x':
@@ -48,7 +50,17 @@ const ROTATION_OFFSETS = (() => {
   return combos;
 })();
 
-const randomShape = () => SHAPES[Math.floor(Math.random() * SHAPES.length)];
+const TOTAL_SHAPE_WEIGHT = SHAPES.reduce((sum, shape) => sum + (shape.weight ?? 1), 0);
+
+const randomShape = () => {
+  const target = Math.random() * TOTAL_SHAPE_WEIGHT;
+  let cumulative = 0;
+  for (const shape of SHAPES) {
+    cumulative += shape.weight ?? 1;
+    if (target <= cumulative) return shape;
+  }
+  return SHAPES[SHAPES.length - 1];
+};
 
 const spawnPosition = (shape) => {
   const highestOffset = shape.cells.reduce((max, [, y]) => Math.max(max, y), 0);
@@ -67,7 +79,7 @@ const createPiece = (shape = randomShape()) => ({
 const createQueue = (length = QUEUE_LENGTH) => Array.from({ length }, () => createPiece());
 
 const mergePiece = (grid, piece) => {
-  const newGrid = grid.map((layer) => layer.map((row) => row.slice()));
+  const newGrid = cloneGrid(grid);
   piece.cells.forEach(([cx, cy, cz]) => {
     const x = piece.position.x + cx;
     const y = piece.position.y + cy;
@@ -77,6 +89,27 @@ const mergePiece = (grid, piece) => {
     }
   });
   return newGrid;
+};
+
+const applyBombEffect = (grid, piece) => {
+  const newGrid = cloneGrid(grid);
+  let removed = 0;
+  piece.cells.forEach(([cx, cy, cz]) => {
+    const x = piece.position.x + cx;
+    const y = piece.position.y + cy;
+    const z = piece.position.z + cz;
+    if (x < 0 || x >= BOARD_SIZE.width) return;
+    if (z < 0 || z >= BOARD_SIZE.depth) return;
+    const targets = [];
+    if (y - 1 >= 0) targets.push(y - 1);
+    targets.push(y);
+    const targetLayer = targets.find((layer) => layer >= 0 && layer < BOARD_SIZE.height && newGrid[layer][z][x]);
+    if (typeof targetLayer === 'number') {
+      newGrid[targetLayer][z][x] = null;
+      removed += 1;
+    }
+  });
+  return { grid: newGrid, removed };
 };
 
 export class GameState {
@@ -331,7 +364,15 @@ export class GameState {
 
   lockPiece() {
     if (!this.activePiece) return;
-    const merged = mergePiece(this.grid, this.activePiece);
+    let merged;
+    let bombRemoval = 0;
+    if (this.activePiece.type === 'bomb') {
+      const result = applyBombEffect(this.grid, this.activePiece);
+      merged = result.grid;
+      bombRemoval = result.removed;
+    } else {
+      merged = mergePiece(this.grid, this.activePiece);
+    }
     const clearedLayers = [];
     for (let y = 0; y < BOARD_SIZE.height; y += 1) {
       const isFull = merged[y].every((row) => row.every((cell) => cell));
@@ -365,6 +406,11 @@ export class GameState {
     }
     if (clearedLayers.length >= 5) {
       this.setMessage('Perfect clear!', 2000);
+    }
+
+    if (bombRemoval > 0) {
+      this.score += bombRemoval * 50;
+      this.setMessage('Bomb cleared an obstacle!', 1200);
     }
 
     if (!this.upcomingPieces || !this.upcomingPieces.length) {
